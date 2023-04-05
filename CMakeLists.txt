@@ -58,7 +58,7 @@ enable_testing()
 
 # attempt to find the binary if user did not specify
 find_program(CLANG_FORMAT_BIN
-        NAMES clang-format clang-format-12
+        NAMES clang-format clang-format-16
         HINTS ${BUSTUB_CLANG_SEARCH_PATH})
 
 if ("${CLANG_FORMAT_BIN}" STREQUAL "CLANG_FORMAT_BIN-NOTFOUND")

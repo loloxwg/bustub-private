@@ -12,14 +12,15 @@
 
 #pragma once
 
+
 #include <memory>
 #include <stack>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <unordered_map>
 #include <utility>
 #include <vector>
-
 #include "common/exception.h"
 #include "common/rwlatch.h"
 
@@ -39,7 +40,7 @@ class TrieNode {
    * @param key_char Key character of this trie node
    */
 
-  explicit TrieNode(char key_char) : key_char_(key_char) {}
+  explicit TrieNode(char key_char) : key_char_(key_char) { children_.clear(); }
 
   /**
    * TODO(P0): Add implementation
@@ -67,7 +68,7 @@ class TrieNode {
    * @param key_char Key char of child node.
    * @return True if this trie node has a child with given key, false otherwise.
    */
-  bool HasChild(char key_char) const { return children_.count(key_char); }
+  bool HasChild(char key_char) const { return children_.find(key_char) != children_.end(); }
 
   /**
    * TODO(P0): Add implementation
@@ -153,6 +154,7 @@ class TrieNode {
     if (!HasChild(key_char)) {
       return;
     }
+    children_[key_char] = nullptr;
     children_.erase(key_char);
   }
 
@@ -204,9 +206,7 @@ class TrieNodeWithValue : public TrieNode {
    * @param trieNode TrieNode whose data is to be moved to TrieNodeWithValue
    * @param value
    */
-  TrieNodeWithValue(TrieNode &&trieNode, T value) : TrieNode(std::move(trieNode)), value_(value) {
-    SetEndNode(is_end_ = true);
-  }
+  TrieNodeWithValue(TrieNode &&trieNode, T value) : TrieNode(std::move(trieNode)), value_(value) { SetEndNode(true); }
 
   /**
    * TODO(P0): Add implementation
@@ -221,7 +221,7 @@ class TrieNodeWithValue : public TrieNode {
    * @param key_char Key char of this node
    * @param value Value of this node
    */
-  TrieNodeWithValue(char key_char, T value) : TrieNode(key_char), value_(value) { SetEndNode(is_end_ = true); }
+  TrieNodeWithValue(char key_char, T value) : TrieNode(key_char), value_(value) { SetEndNode(true); }
 
   /**
    * @brief Destroy the Trie Node With Value object
@@ -254,7 +254,7 @@ class Trie {
    * @brief Construct a new Trie object. Initialize the root node with '\0'
    * character.
    */
-  Trie() : root_(std::make_unique<TrieNode>('\0')){};
+  Trie() : root_(std::make_unique<TrieNode>('\0')) {}
 
   /**
    * TODO(P0): Add implementation
@@ -288,18 +288,20 @@ class Trie {
       return false;
     }
     latch_.WLock();
-    auto current = root_.get();
-    for (auto key_char : key) {
-      if (!current->HasChild(key_char)) {
-        current->InsertChildNode(key_char, std::make_unique<TrieNode>(key_char));
+    auto cur = &root_;
+    for (auto i = key.begin(); i < key.end(); i++) {
+      if (cur->get()->HasChild(*i)) {
+        cur = cur->get()->GetChildNode(*i);
+      } else {
+        cur = cur->get()->InsertChildNode(*i, std::make_unique<TrieNode>(*i));
       }
-      current = current->GetChildNode(key_char)->get();
     }
-    if (current->IsEndNode()) {
+    if (cur->get()->IsEndNode()) {
       latch_.WUnlock();
       return false;
     }
-    current->InsertChildNode(key.back(), std::make_unique<TrieNodeWithValue<T>>(std::move(*current), value));
+    auto new_cur = new TrieNodeWithValue(std::move(**cur), value);
+    cur->reset(new_cur);
     latch_.WUnlock();
     return true;
   }
@@ -326,28 +328,36 @@ class Trie {
       return false;
     }
     latch_.WLock();
-    auto current = root_.get();
+    auto cur = &root_;
     std::stack<std::tuple<char, std::unique_ptr<TrieNode> *>> st;
 
-    for (auto key_char : key) {
-      if (!current->HasChild(key_char)) {
+    for (auto i = key.begin(); i < key.end(); i++) {
+      if (cur->get()->HasChild(*i)) {
+        // push the node into stack
+        st.emplace(*i, cur);
+        cur = cur->get()->GetChildNode(*i);
+      } else {
+        cur = nullptr;
+        while (!st.empty()) {
+          st.pop();
+        }
         latch_.WUnlock();
         return false;
       }
-      current = current->GetChildNode(key_char)->get();
-      st.emplace(key_char, current->GetChildNode(key_char));
     }
-
+    // delete the node
     while (!st.empty()) {
-      auto [key_char, node] = st.top();
+      auto tmp = st.top();
       st.pop();
-
-      if (node->get()->GetChildNode(key_char) == nullptr || node->get()->GetChildNode(key_char)->get()->IsEndNode()) {
+      char key_char = std::get<0>(tmp);
+      auto node = std::get<1>(tmp);
+      auto node_child = (*node)->GetChildNode(key_char);
+      if (!(*node_child)->HasChildren()) {
         (*node)->RemoveChildNode(key_char);
       }
     }
     latch_.WUnlock();
-    return false;
+    return true;
   }
 
   /**
