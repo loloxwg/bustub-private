@@ -135,11 +135,20 @@ class LRUKReplacer {
  private:
   // TODO(student): implement me! You can replace these member variables as you like.
   // Remove maybe_unused if you start using them.
-  [[maybe_unused]] size_t current_timestamp_{0};
-  [[maybe_unused]] size_t curr_size_{0};
-  [[maybe_unused]] size_t replacer_size_;
-  [[maybe_unused]] size_t k_;
+  // size_t current_timestamp_{0};
+  size_t curr_size_{0};
+  size_t replacer_size_;
+  size_t k_;
   std::mutex latch_;
+
+  std::list<frame_id_t> pool_cache_list_; // store the frame_id of the frames that have been accessed k times
+  std::unordered_map<frame_id_t, std::list<frame_id_t>::iterator> pool_cache_index_; // store the iterator of the frame_id in the pool_cache_list
+
+  std::list<frame_id_t> outer_list_; // store the frame_id of the frames that have been accessed less than k times
+  std::unordered_map<frame_id_t, std::list<frame_id_t>::iterator> outer_index_; // store the iterator of the frame_id in the outer_list
+
+  std::unordered_map<frame_id_t, bool> evictable_map_;  // true if evictable and false if not
+  std::unordered_map<frame_id_t, size_t> access_record_map_; // record the access time of each frame
 };
 
 }  // namespace bustub
