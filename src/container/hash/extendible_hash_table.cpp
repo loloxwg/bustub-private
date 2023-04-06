@@ -110,11 +110,15 @@ void ExtendibleHashTable<K, V>::Insert(const K &key, const V &value) {
       int length = dir_.size();
       dir_.resize(length << 1);  // <<1 is same as *2
       for (int i = 0; i < length; i++) {
-        dir_[i + length] = dir_[i];
+        dir_[i + length] = dir_[i];   //length =4
+                                      // dir[4]=dir[0] 100 000
+                                      // dir[5]=dir[1] 101 001
+                                      // dir[6]=dir[2] 110 010
+                                      // dir[7]=dir[3] 111 011
       }
     }
     LOG_DEBUG("stage2: Increment the local depth of the bucket.");
-    // 2. Increment the local depth of the bucket.
+    // 2. If local depth lower than global depth , Increment the local depth of the bucket.
     target_bucket->IncrementDepth();
 
     // 3. Split the bucket and redistribute
@@ -124,6 +128,7 @@ void ExtendibleHashTable<K, V>::Insert(const K &key, const V &value) {
     auto new_bucket = std::make_shared<Bucket>(bucket_size_, target_bucket->GetDepth());
     auto old_bucket = std::make_shared<Bucket>(bucket_size_, target_bucket->GetDepth());
     num_buckets_++;
+    // 3.1. Redistribute the directory pointers.
     for (size_t i = 0; i < dir_.size(); ++i) {
       if (dir_[i] == target_bucket) {
         if ((i & mask) == 0) {
@@ -133,9 +138,8 @@ void ExtendibleHashTable<K, V>::Insert(const K &key, const V &value) {
         }
       }
     }
-
+    // 3.2. Move the kv pairs from the target bucket to the new two bucket.
     for (auto &item : target_bucket->GetItems()) {
-      // Insert(item.first, item.second);
       auto cur_directory_index = IndexOf(item.first);
       dir_[cur_directory_index]->Insert(item.first, item.second);
     }
