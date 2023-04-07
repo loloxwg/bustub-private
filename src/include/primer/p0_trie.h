@@ -12,7 +12,6 @@
 
 #pragma once
 
-
 #include <memory>
 #include <stack>
 #include <stdexcept>

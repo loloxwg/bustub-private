@@ -36,7 +36,7 @@ auto ExtendibleHashTable<K, V>::IndexOf(const K &key) -> size_t {
 
 template <typename K, typename V>
 auto ExtendibleHashTable<K, V>::GetGlobalDepth() const -> int {
-  //std::scoped_lock<std::mutex> lock(latch_);
+  // std::scoped_lock<std::mutex> lock(latch_);
   return GetGlobalDepthInternal();
 }
 
@@ -47,7 +47,7 @@ auto ExtendibleHashTable<K, V>::GetGlobalDepthInternal() const -> int {
 
 template <typename K, typename V>
 auto ExtendibleHashTable<K, V>::GetLocalDepth(int dir_index) const -> int {
-  //std::scoped_lock<std::mutex> lock(latch_);
+  // std::scoped_lock<std::mutex> lock(latch_);
   return GetLocalDepthInternal(dir_index);
 }
 
@@ -58,7 +58,7 @@ auto ExtendibleHashTable<K, V>::GetLocalDepthInternal(int dir_index) const -> in
 
 template <typename K, typename V>
 auto ExtendibleHashTable<K, V>::GetNumBuckets() const -> int {
-  //std::scoped_lock<std::mutex> lock(latch_);
+  // std::scoped_lock<std::mutex> lock(latch_);
   return GetNumBucketsInternal();
 }
 
@@ -110,11 +110,11 @@ void ExtendibleHashTable<K, V>::Insert(const K &key, const V &value) {
       int length = dir_.size();
       dir_.resize(length << 1);  // <<1 is same as *2
       for (int i = 0; i < length; i++) {
-        dir_[i + length] = dir_[i];   //length =4
-                                      // dir[4]=dir[0] 100 000
-                                      // dir[5]=dir[1] 101 001
-                                      // dir[6]=dir[2] 110 010
-                                      // dir[7]=dir[3] 111 011
+        dir_[i + length] = dir_[i];  // length =4
+                                     //  dir[4]=dir[0] 100 000
+                                     //  dir[5]=dir[1] 101 001
+                                     //  dir[6]=dir[2] 110 010
+                                     //  dir[7]=dir[3] 111 011
       }
     }
     LOG_DEBUG("stage2: Increment the local depth of the bucket.");
