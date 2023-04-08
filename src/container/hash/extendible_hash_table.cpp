@@ -74,10 +74,7 @@ auto ExtendibleHashTable<K, V>::Find(const K &key, V &value) -> bool {
 
   auto directory_index = IndexOf(key);
   auto target_bucket = dir_[directory_index];
-  if (target_bucket->Find(key, value)) {
-    return true;
-  }
-  return false;
+  return static_cast<bool>(target_bucket->Find(key, value));
 }
 
 template <typename K, typename V>
@@ -87,10 +84,7 @@ auto ExtendibleHashTable<K, V>::Remove(const K &key) -> bool {
 
   auto directory_index = IndexOf(key);
   auto target_bucket = dir_[directory_index];
-  if (target_bucket->Remove(key)) {
-    return true;
-  }
-  return false;
+  return static_cast<bool>(target_bucket->Remove(key));
 }
 
 template <typename K, typename V>
@@ -103,7 +97,7 @@ void ExtendibleHashTable<K, V>::Insert(const K &key, const V &value) {
   while (!target_bucket->Insert(key, value)) {
     // 1. If the local depth of the bucket is equal to the global depth,
     //  increment the global depth and double the size of the directory.
-    LOG_DEBUG("stage1: dir_.size() =  %ld", dir_.size());
+    // LOG_DEBUG("stage1: dir_.size() =  %ld", dir_.size());
     if (GetLocalDepth(directory_index) == GetGlobalDepth()) {
       global_depth_++;
       LOG_DEBUG("start loop.. dir_.size() =  %ld", dir_.size());
@@ -117,13 +111,13 @@ void ExtendibleHashTable<K, V>::Insert(const K &key, const V &value) {
                                      //  dir[7]=dir[3] 111 011
       }
     }
-    LOG_DEBUG("stage2: Increment the local depth of the bucket.");
+    // LOG_DEBUG("stage2: Increment the local depth of the bucket.");
     // 2. If local depth lower than global depth , Increment the local depth of the bucket.
     target_bucket->IncrementDepth();
 
     // 3. Split the bucket and redistribute
     //  directory pointers & the kv pairs in the bucket.
-    LOG_DEBUG("stage3:  Split the bucket and redistribute");
+    // LOG_DEBUG("stage3:  Split the bucket and redistribute");
     auto mask = 1 << (target_bucket->GetDepth() - 1);
     auto new_bucket = std::make_shared<Bucket>(bucket_size_, target_bucket->GetDepth());
     auto old_bucket = std::make_shared<Bucket>(bucket_size_, target_bucket->GetDepth());

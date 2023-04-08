@@ -101,19 +101,16 @@ void LRUKReplacer::RecordAccess(frame_id_t frame_id) {
       outer_list_.push_front(frame_id);
       outer_index_[frame_id] = outer_list_.begin();
     }
-  }
-  // if access record is equal to k,
-  // then it is erased from outer list
-  // and insert into pool cache list
-  else if (access_record_map_[frame_id] == k_) {
+  } else if (access_record_map_[frame_id] == k_) {
+    // if access record is equal to k,
+    // then it is erased from outer list
+    // and insert into pool cache list
     auto it = outer_index_[frame_id];
     outer_list_.erase(it);
     outer_index_.erase(frame_id);
     pool_cache_list_.push_front(frame_id);
     pool_cache_index_[frame_id] = pool_cache_list_.begin();
-  }
-  // if access record is greater than k
-  else {
+  } else {  // if access record is greater than k
     // if it has already in pool cache list,
     // first erase it from pool cache list
     // then insert it into pool cache list

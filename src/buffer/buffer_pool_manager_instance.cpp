@@ -42,6 +42,31 @@ BufferPoolManagerInstance::~BufferPoolManagerInstance() {
   delete replacer_;
 }
 
+void BufferPoolManagerInstance::ResetPgMeta(frame_id_t frame_id, page_id_t page_id) {
+  pages_[frame_id].page_id_ = page_id;
+  pages_[frame_id].is_dirty_ = false;
+  pages_[frame_id].pin_count_ = 0;
+}
+
+void BufferPoolManagerInstance::PinPage(frame_id_t frame_id) {
+  pages_[frame_id].pin_count_++;
+  replacer_->SetEvictable(frame_id, false);
+  replacer_->RecordAccess(frame_id);
+}
+
+auto BufferPoolManagerInstance::PgImpHelper(frame_id_t *frame_id) -> bool {
+  if (!free_list_.empty()) {
+    *frame_id = free_list_.back();
+    free_list_.pop_back();
+    return true;
+  }
+  if (replacer_->Evict(frame_id)) {
+    page_table_->Remove(pages_[*frame_id].GetPageId());
+    return true;
+  }
+  return false;
+}
+
 /**
  * TODO(P1): Add implementation
  *
@@ -61,20 +86,18 @@ BufferPoolManagerInstance::~BufferPoolManagerInstance() {
  */
 auto BufferPoolManagerInstance::NewPgImp(page_id_t *page_id) -> Page * {
   std::scoped_lock<std::mutex> guard(latch_);
-  bool free_page = false;
-  // check if there is a free page in the buffer pool manager instance
-  for (size_t i = 0; i < pool_size_; ++i) {
-    if (pages_[i].GetPinCount() == 0) {
-      free_page = true;
+  bool all_pinned = true;
+  for (size_t i = 0; i < pool_size_; i++) {
+    if (pages_[i].GetPinCount() <= 0) {
+      all_pinned = false;
       break;
     }
   }
-  // if there is no free page, return nullptr
-  if (!free_page) {
+
+  if (all_pinned) {
     return nullptr;
   }
   // if there is a free page, allocate a new page id and return the page pointer
-  *page_id = AllocatePage();  // get new page id from disk manager
 
   frame_id_t frame_id;
   // check if there is a free page in the free list
@@ -85,33 +108,34 @@ auto BufferPoolManagerInstance::NewPgImp(page_id_t *page_id) -> Page * {
     free_list_.pop_front();
   } else {
     // if there is no free page in the free list, use the page that is evictable
-    replacer_->Evict(&frame_id);
-
-    // if the page is dirty, write it back to the disk
-    if (pages_[frame_id].IsDirty()) {
-      disk_manager_->WritePage(pages_[frame_id].GetPageId(), pages_[frame_id].GetData());
-      pages_[frame_id].is_dirty_ = false;
+    auto victim_found = replacer_->Evict(&frame_id);
+    if (!victim_found) {
+      return nullptr;
     }
-    // reset the memory and metadata for the new page
-    pages_[frame_id].ResetMemory();
-    // reset the pin count for the new page
-    page_table_->Remove(pages_[frame_id].GetPageId());
   }
 
-  // insert the new page into the page table
-  page_table_->Insert(*page_id, frame_id);
-  // set the page id for the new page
-  pages_[frame_id].page_id_ = *page_id;
-  // set the pin count for the new page
-  pages_[frame_id].pin_count_ = 1;
+  auto frame = &pages_[frame_id];
+  // if the page is dirty, write it back to the disk
+  if (frame->IsDirty()) {
+    disk_manager_->WritePage(frame->GetPageId(), frame->GetData());
+    frame->is_dirty_ = false;
+  }
 
-  // Pin the frame by calling replacer.SetEvictable(frame_id, false)
-  // so that the replacer wouldn't evict the frame before the buffer pool manager "Unpin"s it.
-  // Also, remember to record the access history of the frame in the replacer for the lru-k algorithm to work.
+  page_table_->Remove(frame->GetPageId());
+
+  auto new_page_id = AllocatePage();
+
+  frame->page_id_ = new_page_id;
+  frame->pin_count_++;
+  frame->ResetMemory();
+
   replacer_->RecordAccess(frame_id);
   replacer_->SetEvictable(frame_id, false);
+  *page_id = new_page_id;
+  // insert the new page into the page table
+  page_table_->Insert(*page_id, frame_id);
 
-  return &pages_[frame_id];
+  return frame;
 }
 
 /**
@@ -144,49 +168,51 @@ auto BufferPoolManagerInstance::FetchPgImp(page_id_t page_id) -> Page * {
     return &pages_[frame_id];
   }
 
-  bool free_page = false;
-  for (size_t i = 0; i < pool_size_; ++i) {
-    if (pages_[i].GetPinCount() == 0) {
-      free_page = true;
+  bool all_pinned = true;
+  for (size_t i = 0; i < pool_size_; i++) {
+    if (pages_[i].GetPinCount() <= 0) {
+      all_pinned = false;
       break;
     }
   }
-  if (!free_page) {
+
+  if (all_pinned) {
     return nullptr;
   }
 
-  // if the page is not in the buffer pool manager instance, check if there is a free page in the free list
+  // if the page is not in the buffer pool manager instance,
+  // check if there is a free page in the free list if not found
+  // get the frame id of the replacement frame
   if (!free_list_.empty()) {
     frame_id = free_list_.front();
     free_list_.pop_front();
   } else {
-    // if there is no free page in the free list, use the page that is evictable
-    if (!replacer_->Evict(&frame_id)) {
+    auto victim_found = replacer_->Evict(&frame_id);
+    if (!victim_found) {
       return nullptr;
     }
-
-    replacer_->Evict(&frame_id);
-    page_id_t evicted_page_id = pages_[frame_id].GetPageId();
-
-    // if the page is dirty, write it back to the disk
-    if (pages_[frame_id].IsDirty()) {
-      disk_manager_->WritePage(evicted_page_id, pages_[frame_id].GetData());
-      pages_[frame_id].is_dirty_ = false;
-    }
-    // reset the memory and metadata for the new page
-    pages_[frame_id].ResetMemory();
-    // reset the pin count for the new page
-    page_table_->Remove(evicted_page_id);
   }
-  page_table_->Insert(page_id, frame_id);
-  pages_[frame_id].page_id_ = page_id;
-  pages_[frame_id].pin_count_ = 1;
-  disk_manager_->ReadPage(page_id, pages_[frame_id].GetData());
+  // set new frame
+  auto frame = &pages_[frame_id];
+
+  // if the page is dirty, write it back to the disk
+  if (frame->IsDirty()) {
+    disk_manager_->WritePage(frame->GetPageId(), frame->GetData());
+    frame->is_dirty_ = false;
+  }
+  // remove the old page from the page table
+  page_table_->Remove(frame->GetPageId());
+  // read the page from disk
+  disk_manager_->ReadPage(page_id, frame->GetData());
+  frame->page_id_ = page_id;
+  frame->pin_count_++;
 
   replacer_->RecordAccess(frame_id);
   replacer_->SetEvictable(frame_id, false);
+  // insert the new page into the page table
+  page_table_->Insert(page_id, frame_id);
 
-  return &pages_[frame_id];
+  return frame;
 }
 
 /**
@@ -211,13 +237,16 @@ auto BufferPoolManagerInstance::UnpinPgImp(page_id_t page_id, bool is_dirty) -> 
   if (pages_[frame_id].GetPinCount() <= 0) {
     return false;
   }
+  // only is_dirty_ true can set page dirty ，
+  // if is_dirty_ is false，page can not set no dirty, cause another threads may modify this page！
+  if (is_dirty) {
+    pages_[frame_id].is_dirty_ = true;
+  }
   pages_[frame_id].pin_count_--;
   if (pages_[frame_id].GetPinCount() == 0) {
     replacer_->SetEvictable(frame_id, true);
   }
-  if (is_dirty) {
-    pages_[frame_id].is_dirty_ = true;
-  }
+
   return true;
 }
 
@@ -243,7 +272,6 @@ auto BufferPoolManagerInstance::FlushPgImp(page_id_t page_id) -> bool {
   if (!page_table_->Find(page_id, frame_id)) {
     return false;
   }
-
   disk_manager_->WritePage(page_id, pages_[frame_id].GetData());
   pages_[frame_id].is_dirty_ = false;
   return true;
