@@ -10,7 +10,7 @@ LRU-K中的K代表最近使用的次数，因此LRU可以认为是LRU-1。LRU-K�
 
 相比LRU，LRU-K需要多维护一个队列，用于记录所有缓存数据被访问的历史。只有当数据的访问次数达到K次的时候，才将数据放入缓存。当需要淘汰数据时，LRU-K会淘汰第K次访问时间距当前时间最大的数据。详细实现如下
 
-![https://upload-images.jianshu.io/upload_images/2099201-a41c570dcac9fcad.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240](/Users/xwg/dev/db/bustub-private/records/assets/1240)
+![](/Users/xwg/dev/cmu/bustub-private/records/assets/1240.png)
 
 (1).数据第一次被访问，加入到访问历史列表；
 
@@ -24,7 +24,7 @@ LRU-K中的K代表最近使用的次数，因此LRU可以认为是LRU-1。LRU-K�
 
 LRU-K具有LRU的优点，同时能够避免LRU的缺点，实际应用中LRU-2是综合各种因素后最优的选择，LRU-3或者更大的K值命中率会高，但适应性差，需要大量的数据访问才能将历史访问记录清除掉。
 
-**二、Twoqueues（2Q）**
+**二、Twoqueues（2Q）**本次LAB使用的思想 
 
 1、算法思想
 
@@ -34,7 +34,7 @@ LRU-K具有LRU的优点，同时能够避免LRU的缺点，实际应用中LRU-2�
 
 当数据第一次访问时，2Q算法将数据缓存在FIFO队列里面，当数据第二次被访问时，则将数据从FIFO队列移到LRU队列里面，两个队列各自按照自己的方法淘汰数据。详细实现如下：
 
-![http://upload-images.jianshu.io/upload_images/2099201-c7cd9fd3e6dd1a83.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240](/Users/xwg/dev/db/bustub-private/records/assets/1240-20230407025620502)
+![CleanShot 2023-04-11 at 10.46.44@2x](assets/CleanShot%202023-04-11%20at%2010.46.44@2x.png)
 
 (1).新访问的数据插入到FIFO队列；
 
