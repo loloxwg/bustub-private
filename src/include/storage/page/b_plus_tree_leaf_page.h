@@ -63,6 +63,7 @@ class BPlusTreeLeafPage : public BPlusTreePage {
   void MoveLastToFrontOf(BPlusTreeLeafPage *recipient);
 
  private:
+  // 指向下一个 leaf page（用于 range scan）。因此 leaf page 的 header 大小为 28 Byte。
   page_id_t next_page_id_;
   // Flexible array member for page data.
   MappingType array_[1];

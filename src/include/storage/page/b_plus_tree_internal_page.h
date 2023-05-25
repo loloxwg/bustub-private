@@ -60,6 +60,13 @@ class BPlusTreeInternalPage : public BPlusTreePage {
 
  private:
   // Flexible array member for page data.
+
+  // 简单来说就是，当你有一个类，这个类中有一个成员为数组。
+  // 在用这个类初始化一个对象时，你不能确定该将这个数组的大小设置为多少，
+  // 但知道这整个对象的大小是多少 byte，你就可以用到 flexible array。
+  // flexible array 必须是类中的最后一个成员，并且仅能有一个。
+  // 在为对象分配内存时，flexible array 会自动填充，占用未被其他变量使用的内存。
+  // 这样就可以确定自己的长度了。
   MappingType array_[1];
 
   void CopyNFrom(MappingType *items, int size, BufferPoolManager *buffer_pool_manager);

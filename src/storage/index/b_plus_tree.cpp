@@ -102,39 +102,42 @@ void BPLUSTREE_TYPE::StartNewTree(const KeyType &key, const ValueType &value) {
 
 INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::InsertIntoLeaf(const KeyType &key, const ValueType &value, Transaction *transaction) -> bool {
-  auto leaf_page = FindLeaf(key, Operation::INSERT, transaction);
-  auto *node = reinterpret_cast<LeafPage *>(leaf_page->GetData());
+  auto buffer_page = FindLeaf(key, Operation::INSERT, transaction);
+  auto bplus_page = reinterpret_cast<LeafPage *>(buffer_page->GetData());
 
-  auto size = node->GetSize();
-  auto new_size = node->Insert(key, value, comparator_);
+  auto before_insert_size = bplus_page->GetSize();
+  auto new_size = bplus_page->Insert(key, value, comparator_);
 
   // duplicate key
-  if (new_size == size) {
+  if (new_size == before_insert_size) {
     ReleaseLatchFromQueue(transaction);
-    leaf_page->WUnlatch();
-    buffer_pool_manager_->UnpinPage(leaf_page->GetPageId(), false);
+    buffer_page->WUnlatch();
+    buffer_pool_manager_->UnpinPage(buffer_page->GetPageId(), false);
     return false;
   }
 
   // leaf is not full
   if (new_size < leaf_max_size_) {
     ReleaseLatchFromQueue(transaction);
-    leaf_page->WUnlatch();
-    buffer_pool_manager_->UnpinPage(leaf_page->GetPageId(), true);
+    buffer_page->WUnlatch();
+    buffer_pool_manager_->UnpinPage(buffer_page->GetPageId(), true);
     return true;
   }
 
   // leaf is full, need to split
-  auto sibling_leaf_node = Split(node);
-  sibling_leaf_node->SetNextPageId(node->GetNextPageId());
-  node->SetNextPageId(sibling_leaf_node->GetPageId());
+  auto right_sibling_leaf_node = Split(bplus_page);
+  // 更新原 page 和新 page 的 next page id，
+  right_sibling_leaf_node->SetNextPageId(bplus_page->GetNextPageId());
+  bplus_page->SetNextPageId(right_sibling_leaf_node->GetPageId());
 
-  auto risen_key = sibling_leaf_node->KeyAt(0);
-  InsertIntoParent(node, risen_key, sibling_leaf_node, transaction);
+  // 取0号元素作为插入父节点元素
+  auto risen_key = right_sibling_leaf_node->KeyAt(0);
+  std::cout << "risen_key " << risen_key << std::endl;
+  InsertIntoParent(bplus_page, risen_key, right_sibling_leaf_node, transaction);
 
-  leaf_page->WUnlatch();
-  buffer_pool_manager_->UnpinPage(leaf_page->GetPageId(), true);
-  buffer_pool_manager_->UnpinPage(sibling_leaf_node->GetPageId(), true);
+  buffer_page->WUnlatch();
+  buffer_pool_manager_->UnpinPage(buffer_page->GetPageId(), true);
+  buffer_pool_manager_->UnpinPage(right_sibling_leaf_node->GetPageId(), true);
   return true;
 }
 
@@ -148,6 +151,7 @@ auto BPLUSTREE_TYPE::InsertIntoLeaf(const KeyType &key, const ValueType &value, 
 INDEX_TEMPLATE_ARGUMENTS
 template <typename N>
 auto BPLUSTREE_TYPE::Split(N *node) -> N * {
+  // 新建一个空的page
   page_id_t page_id;
   auto page = buffer_pool_manager_->NewPage(&page_id);
 
@@ -163,6 +167,7 @@ auto BPLUSTREE_TYPE::Split(N *node) -> N * {
     auto *new_leaf = reinterpret_cast<LeafPage *>(new_node);
 
     new_leaf->Init(page->GetPageId(), node->GetParentPageId(), leaf_max_size_);
+    // 将原 page 的一半转移到新 page 中，（假如选择将新 page 放在原 page 右侧，则转移原 page 的右半部分）
     leaf->MoveHalfTo(new_leaf);
   } else {
     auto *internal = reinterpret_cast<InternalPage *>(node);
@@ -209,24 +214,41 @@ void BPLUSTREE_TYPE::InsertIntoParent(BPlusTreePage *old_node, const KeyType &ke
     ReleaseLatchFromQueue(transaction);
     return;
   }
+  // 4.1 根据 parent page id 拿到 parent page，
   auto parent_page = buffer_pool_manager_->FetchPage(old_node->GetParentPageId());
   auto *parent_node = reinterpret_cast<InternalPage *>(parent_page->GetData());
-
+  // 4.2 判断 parent page size 是否等于 max size，是否有足够容量
   if (parent_node->GetSize() < internal_max_size_) {
+    // 5.将用于区分原 page 和新 page 的 key 插入 parent page 中，
+    // 递归终止条件 父节点的size 可以容纳足够的key
     parent_node->InsertNodeAfter(old_node->GetPageId(), key, new_node->GetPageId());
     ReleaseLatchFromQueue(transaction);
     buffer_pool_manager_->UnpinPage(parent_page->GetPageId(), true);
     return;
   }
+  //
+  // parent_node->GetSize() = internal_max_size_
+  // 申请一个比 internal_max_size_ 还多1个kv 的内存空间
+  // Q:为什么不直接在原来的 page 做呢？
+  // A:原来的 page 没有足够容量 新插入一个kv 会导致内存溢出
   auto *mem = new char[INTERNAL_PAGE_HEADER_SIZE + sizeof(MappingType) * (parent_node->GetSize() + 1)];
+  // 因为有柔性数组 所以能够强制类型转换
   auto *copy_parent_node = reinterpret_cast<InternalPage *>(mem);
+  // 把 父节点的data 拷贝进入我们申请的合法空间
   std::memcpy(mem, parent_page->GetData(), INTERNAL_PAGE_HEADER_SIZE + sizeof(MappingType) * (parent_node->GetSize()));
+  // 在这个有足够容量的临时 page 中插入新的key
   copy_parent_node->InsertNodeAfter(old_node->GetPageId(), key, new_node->GetPageId());
+  // 分裂临时page 和新page
   auto parent_new_sibling_node = Split(copy_parent_node);
-  KeyType new_key = parent_new_sibling_node->KeyAt(0);
+  //
+  auto new_key = parent_new_sibling_node->KeyAt(0);
+  std::cout << "new_key  " << new_key << std::endl;
+  // 从临时page 拷贝到原来父节点page
   std::memcpy(parent_page->GetData(), mem,
               INTERNAL_PAGE_HEADER_SIZE + sizeof(MappingType) * copy_parent_node->GetMinSize());
+  // new key 插入到父节点中 递归
   InsertIntoParent(parent_node, new_key, parent_new_sibling_node, transaction);
+
   buffer_pool_manager_->UnpinPage(parent_page->GetPageId(), true);
   buffer_pool_manager_->UnpinPage(parent_new_sibling_node->GetPageId(), true);
   delete[] mem;
@@ -474,8 +496,10 @@ auto BPLUSTREE_TYPE::FindLeaf(const KeyType &key, Operation operation, Transacti
   assert(operation == Operation::SEARCH ? !(leftMost && rightMost) : transaction != nullptr);
 
   assert(root_page_id_ != INVALID_PAGE_ID);
+
   auto page = buffer_pool_manager_->FetchPage(root_page_id_);
   auto *node = reinterpret_cast<BPlusTreePage *>(page->GetData());
+
   if (operation == Operation::SEARCH) {
     root_page_id_latch_.RUnlock();
     page->RLatch();
@@ -491,7 +515,7 @@ auto BPLUSTREE_TYPE::FindLeaf(const KeyType &key, Operation operation, Transacti
       ReleaseLatchFromQueue(transaction);
     }
   }
-
+  // 非叶子节点
   while (!node->IsLeafPage()) {
     auto *i_node = reinterpret_cast<InternalPage *>(node);
 
@@ -501,6 +525,7 @@ auto BPLUSTREE_TYPE::FindLeaf(const KeyType &key, Operation operation, Transacti
     } else if (rightMost) {
       child_node_page_id = i_node->ValueAt(i_node->GetSize() - 1);
     } else {
+      // 主要操作 二分查找
       child_node_page_id = i_node->Lookup(key, comparator_);
     }
     assert(child_node_page_id > 0);

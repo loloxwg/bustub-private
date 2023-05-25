@@ -65,12 +65,13 @@ class BPlusTreePage {
 
  private:
   // member variable, attributes that both internal and leaf page share
-  IndexPageType page_type_;
-  lsn_t lsn_;
-  int size_;
-  int max_size_;
-  page_id_t parent_page_id_;
-  page_id_t page_id_;
+  IndexPageType page_type_;   // leaf or internal. 4 Byte
+  lsn_t lsn_;                 // Log sequence number (Used in Project 4)
+  int size_;                  // tree page data size(not in byte, in count). 4 Byte
+  int max_size_;              // tree page data max size(not in byte, in count). 4 Byte
+  page_id_t parent_page_id_;  // 4 Byte
+  page_id_t page_id_;         // 4 Byte
+  // 24 Byte in total
 };
 
 }  // namespace bustub

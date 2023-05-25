@@ -91,18 +91,45 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::SetValueAt(int index, const ValueType &valu
 
     在 B+ 树的内部节点中，每个键值对应一个子节点，所以每个键值对应的值也就是子节点的指针。
     因此，std::prev(k_it)->second 表示的是比 key 小的最大键值对应的子节点的指针，可以作为递归查找的下一个节点。
+
+    std::lower_bound 算法用于在叶子节点的数组中查找第一个大于或等于给定 key 值的元素，并返回指向该元素的迭代器。这里的
+array_ + 1 表示数组的起始位置为 array_ 数组中的第二个元素，而不是第一个元素，因为在 B+
+树的叶子节点中，第一个元素是一个无用的指针，不存储实际的键值对，因此在查找时需要跳过这个元素。
+
+array_ + GetSize() 表示数组的结束位置，GetSize() 函数返回的是数组中存储的键值对的数量。
+
+key 是要查找的键值对的 key 值。
+
+lambda 表达式 [&comparator](const auto &pair, auto k) { return comparator(pair.first, k) < 0; }
+是一个用于比较键值对的函数对象，用于指定 std::lower_bound 算法使用的比较规则。其中，&comparator 是一个引用捕获，表示在
+lambda 表达式内部使用外部定义的 comparator 比较器对象。lambda 表达式接受两个参数，第一个参数 pair
+表示数组中的元素，第二个参数 k 表示要查找的 key 值。这个 lambda 表达式返回一个 bool 类型的值，表示 pair 的 key
+值是否小于 k。如果小于则返回 true，否则返回 false。
+
+    target 是指向第一个大于或等于 key 的元素的迭代器。如果序列中没有大于或等于 key 的元素，则返回指向序列结尾的迭代器。
+
+        如果 target 指向的元素的 key 值等于 key，则返回对应的 value 值，即 target->second。
+
+            如果 target 指向的元素的 key 值大于 key，则返回它前一个元素的 value 值，即
+std::prev(target)->second。这样可以保证查找结果的正确性，因为 B+ 树中的叶子节点是按照 key 值从小到大排序的，因此
+std::prev(target) 指向的元素是小于 key 的最大元素。如果 target 指向的元素是叶子节点中的第一个元素，那么
+std::prev(target) 将指向叶子节点中的最后一个元素，因此需要特殊处理这种情况，将其返回值设为叶子节点中的最后一个元素的
+value 值，即 ValueAt(GetSize() - 1)。
  */
 
 INDEX_TEMPLATE_ARGUMENTS
 auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::Lookup(const KeyType &key, const KeyComparator &comparator) const -> ValueType {
   auto target = std::lower_bound(array_ + 1, array_ + GetSize(), key,
                                  [&comparator](const auto &pair, auto k) { return comparator(pair.first, k) < 0; });
+  // 查到的很大 取这个叶子里最后一个元素
   if (target == array_ + GetSize()) {
     return ValueAt(GetSize() - 1);
   }
+  // 查到的等于 取这个元素
   if (comparator(target->first, key) == 0) {
     return target->second;
   }
+  // 查到的小于 取前一个元素 比key 小的 最大元素
   return std::prev(target)->second;
 }
 
