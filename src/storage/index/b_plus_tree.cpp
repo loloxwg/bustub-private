@@ -32,20 +32,22 @@ auto BPLUSTREE_TYPE::IsEmpty() const -> bool { return root_page_id_ == INVALID_P
  */
 INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::GetValue(const KeyType &key, std::vector<ValueType> *result, Transaction *transaction) -> bool {
+  /*
+   * 查数据时，加读锁
+   *
+   *
+   * */
   root_page_id_latch_.RLock();
-  auto leaf_page = FindLeaf(key, Operation::SEARCH, transaction);
-  auto *node = reinterpret_cast<LeafPage *>(leaf_page->GetData());
-
+  auto buffer_leaf_page = FindLeaf(key, Operation::SEARCH, transaction);
+  auto bplus_leaf_page = reinterpret_cast<LeafPage *>(buffer_leaf_page->GetData());
   ValueType v;
-  auto existed = node->Lookup(key, &v, comparator_);
-
-  leaf_page->RUnlatch();
-  buffer_pool_manager_->UnpinPage(leaf_page->GetPageId(), false);
-
-  if (!existed) {
+  bool is_existed = bplus_leaf_page->Lookup(key, &v, comparator_);
+  /*缓冲池解标记,查数据是不会弄脏数据的，只有写数据了才会dirty*/
+  buffer_leaf_page->RUnlatch();
+  buffer_pool_manager_->UnpinPage(buffer_leaf_page->GetPageId(), false);
+  if (!is_existed) {
     return false;
   }
-
   result->push_back(v);
   return true;
 }
@@ -74,18 +76,14 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value, Transact
 
 INDEX_TEMPLATE_ARGUMENTS
 void BPLUSTREE_TYPE::StartNewTree(const KeyType &key, const ValueType &value) {
-  auto page = buffer_pool_manager_->NewPage(&root_page_id_);
-
-  if (page == nullptr) {
+  auto buffer_page = buffer_pool_manager_->NewPage(&root_page_id_);
+  if (buffer_page == nullptr) {
     throw Exception(ExceptionType::OUT_OF_MEMORY, "Cannot allocate new page");
   }
-
-  auto *leaf = reinterpret_cast<LeafPage *>(page->GetData());
-  leaf->Init(root_page_id_, INVALID_PAGE_ID, leaf_max_size_);
-
-  leaf->Insert(key, value, comparator_);
-
-  buffer_pool_manager_->UnpinPage(page->GetPageId(), true);
+  auto bplus_page = reinterpret_cast<LeafPage *>(buffer_page->GetData());
+  bplus_page->Init(root_page_id_, INVALID_PAGE_ID, leaf_max_size_);
+  bplus_page->Insert(key, value, comparator_);
+  buffer_pool_manager_->UnpinPage(buffer_page->GetPageId(), true);
 
   UpdateRootPageId(1);
 }
@@ -108,7 +106,8 @@ auto BPLUSTREE_TYPE::InsertIntoLeaf(const KeyType &key, const ValueType &value, 
   auto before_insert_size = bplus_page->GetSize();
   auto new_size = bplus_page->Insert(key, value, comparator_);
 
-  // duplicate key
+  /*查看叶子节点满没满*/
+  /*1. 重复key*/
   if (new_size == before_insert_size) {
     ReleaseLatchFromQueue(transaction);
     buffer_page->WUnlatch();
@@ -116,7 +115,7 @@ auto BPLUSTREE_TYPE::InsertIntoLeaf(const KeyType &key, const ValueType &value, 
     return false;
   }
 
-  // leaf is not full
+  /*2. 没满，则直接插入*/
   if (new_size < leaf_max_size_) {
     ReleaseLatchFromQueue(transaction);
     buffer_page->WUnlatch();
@@ -124,7 +123,7 @@ auto BPLUSTREE_TYPE::InsertIntoLeaf(const KeyType &key, const ValueType &value, 
     return true;
   }
 
-  // leaf is full, need to split
+  /*3. 满了，则先分裂*/
   auto right_sibling_leaf_node = Split(bplus_page);
   // 更新原 page 和新 page 的 next page id，
   right_sibling_leaf_node->SetNextPageId(bplus_page->GetNextPageId());
@@ -135,6 +134,7 @@ auto BPLUSTREE_TYPE::InsertIntoLeaf(const KeyType &key, const ValueType &value, 
   std::cout << "risen_key " << risen_key << std::endl;
   InsertIntoParent(bplus_page, risen_key, right_sibling_leaf_node, transaction);
 
+  ReleaseLatchFromQueue(transaction);
   buffer_page->WUnlatch();
   buffer_pool_manager_->UnpinPage(buffer_page->GetPageId(), true);
   buffer_pool_manager_->UnpinPage(right_sibling_leaf_node->GetPageId(), true);
@@ -460,6 +460,10 @@ auto BPLUSTREE_TYPE::AdjustRoot(BPlusTreePage *old_root_node) -> bool {
  */
 INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::Begin() -> INDEXITERATOR_TYPE {
+  /** fix root_page_id_ is null*/
+  if (root_page_id_ == INVALID_PAGE_ID) {
+    return INDEXITERATOR_TYPE(nullptr, nullptr);
+  }
   root_page_id_latch_.RLock();
   auto leftmost_page = FindLeaf(KeyType(), Operation::SEARCH, nullptr, true);
   return INDEXITERATOR_TYPE(buffer_pool_manager_, leftmost_page, 0);
@@ -471,11 +475,15 @@ auto BPLUSTREE_TYPE::Begin() -> INDEXITERATOR_TYPE {
  */
 INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::Begin(const KeyType &key) -> INDEXITERATOR_TYPE {
+  /** fix root_page_id_ is null*/
+  if (root_page_id_ == INVALID_PAGE_ID) {
+    return INDEXITERATOR_TYPE(nullptr, nullptr);
+  }
   root_page_id_latch_.RLock();
-  auto leaf_page = FindLeaf(key, Operation::SEARCH);
-  auto *leaf_node = reinterpret_cast<LeafPage *>(leaf_page->GetData());
+  auto buffer_page = FindLeaf(key, Operation::SEARCH);
+  auto *leaf_node = reinterpret_cast<LeafPage *>(buffer_page->GetData());
   auto idx = leaf_node->KeyIndex(key, comparator_);
-  return INDEXITERATOR_TYPE(buffer_pool_manager_, leaf_page, idx);
+  return INDEXITERATOR_TYPE(buffer_pool_manager_, buffer_page, idx);
 }
 /*
  * Input parameter is void, construct an index iterator representing the end
@@ -484,6 +492,10 @@ auto BPLUSTREE_TYPE::Begin(const KeyType &key) -> INDEXITERATOR_TYPE {
  */
 INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::End() -> INDEXITERATOR_TYPE {
+  /** fix root_page_id_ is null*/
+  if (root_page_id_ == INVALID_PAGE_ID) {
+    return INDEXITERATOR_TYPE(nullptr, nullptr);
+  }
   root_page_id_latch_.RLock();
   auto rightmost_page = FindLeaf(KeyType(), Operation::SEARCH, nullptr, false, true);
   auto *leaf_node = reinterpret_cast<LeafPage *>(rightmost_page->GetData());
@@ -583,11 +595,7 @@ void BPLUSTREE_TYPE::ReleaseLatchFromQueue(Transaction *transaction) {
  * @return Page id of the root of this tree
  */
 INDEX_TEMPLATE_ARGUMENTS
-auto BPLUSTREE_TYPE::GetRootPageId() -> page_id_t {
-  root_page_id_latch_.RLock();
-  root_page_id_latch_.RUnlock();
-  return root_page_id_;
-}
+auto BPLUSTREE_TYPE::GetRootPageId() -> page_id_t { return root_page_id_; }
 /*****************************************************************************
  * UTILITIES AND DEBUG
  *****************************************************************************/

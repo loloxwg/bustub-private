@@ -14,13 +14,21 @@ namespace bustub {
 INDEX_TEMPLATE_ARGUMENTS
 INDEXITERATOR_TYPE::IndexIterator(BufferPoolManager *bpm, Page *page, int index)
     : buffer_pool_manager_(bpm), page_(page), index_(index) {
-  leaf_ = reinterpret_cast<LeafPage *>(page->GetData());
+  /** fix root_page_id_ is null*/
+  if (page != nullptr) {
+    leaf_ = reinterpret_cast<LeafPage *>(page->GetData());
+  } else {
+    leaf_ = nullptr;
+  }
 }
 
 INDEX_TEMPLATE_ARGUMENTS
 INDEXITERATOR_TYPE::~IndexIterator() {
-  page_->RUnlatch();
-  buffer_pool_manager_->UnpinPage(page_->GetPageId(), false);
+  /** fix root_page_id_ is null*/
+  if (page_ != nullptr) {
+    page_->RUnlatch();
+    buffer_pool_manager_->UnpinPage(page_->GetPageId(), false);
+  }
 }
 INDEX_TEMPLATE_ARGUMENTS
 auto INDEXITERATOR_TYPE::IsEnd() -> bool {
@@ -50,7 +58,8 @@ auto INDEXITERATOR_TYPE::operator++() -> INDEXITERATOR_TYPE & {
 
 INDEX_TEMPLATE_ARGUMENTS
 auto INDEXITERATOR_TYPE::operator==(const IndexIterator &itr) const -> bool {
-  return leaf_->GetPageId() == itr.leaf_->GetPageId() && index_ == itr.index_;
+  /** fix root_page_id_ is null*/
+  return leaf_ == nullptr || (leaf_->GetPageId() == itr.leaf_->GetPageId() && index_ == itr.index_);
 }
 
 INDEX_TEMPLATE_ARGUMENTS
