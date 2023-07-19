@@ -100,7 +100,7 @@ void ExtendibleHashTable<K, V>::Insert(const K &key, const V &value) {
     // LOG_DEBUG("stage1: dir_.size() =  %ld", dir_.size());
     if (GetLocalDepth(directory_index) == GetGlobalDepth()) {
       global_depth_++;
-      LOG_DEBUG("start loop.. dir_.size() =  %ld", dir_.size());
+      // LOG_DEBUG("start loop.. dir_.size() =  %ld", dir_.size());
       int length = dir_.size();
       dir_.resize(length << 1);  // <<1 is same as *2
       for (int i = 0; i < length; i++) {
