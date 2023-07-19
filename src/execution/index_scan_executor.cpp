@@ -13,10 +13,38 @@
 
 namespace bustub {
 IndexScanExecutor::IndexScanExecutor(ExecutorContext *exec_ctx, const IndexScanPlanNode *plan)
-    : AbstractExecutor(exec_ctx) {}
+    : AbstractExecutor(exec_ctx),
+      plan_{plan},
+      index_info_{this->exec_ctx_->GetCatalog()->GetIndex(plan_->index_oid_)},
+      table_info_{this->exec_ctx_->GetCatalog()->GetTable(index_info_->table_name_)},
+      tree_{dynamic_cast<BPlusTreeIndexForOneIntegerColumn *>(index_info_->index_.get())},
+      iter_{tree_->GetBeginIterator()} {
+  //  auto index_info = exec_ctx_->GetCatalog()->GetIndex(plan_->GetIndexOid());
+  //  index_ = dynamic_cast<BPlusTreeIndexForOneIntegerColumn *>(index_info->index_.get());
+  //  iter_ = index_->GetBeginIterator();
+  //  table_info_ = exec_ctx_->GetCatalog()->GetTable(index_info->table_name_);
+}
 
-void IndexScanExecutor::Init() { throw NotImplementedException("IndexScanExecutor is not implemented"); }
+void IndexScanExecutor::Init() {}
 
-auto IndexScanExecutor::Next(Tuple *tuple, RID *rid) -> bool { return false; }
+auto IndexScanExecutor::Next(Tuple *tuple, RID *rid) -> bool {
+  if (iter_ == tree_->GetEndIterator()) {
+    return false;
+  }
+
+  *rid = (*iter_).second;
+  auto result = table_info_->table_->GetTuple(*rid, tuple, exec_ctx_->GetTransaction());
+  ++iter_;
+
+  return result;
+  //  if (iterator_ != index_->GetEndIterator()) {
+  //    *rid = (*iterator_).second;
+  //    if (table_info_->table_->GetTuple(*rid, tuple, exec_ctx_->GetTransaction())) {
+  //      ++iterator_;
+  //      return true;
+  //    }
+  //  }
+  //  return false;
+}
 
 }  // namespace bustub
