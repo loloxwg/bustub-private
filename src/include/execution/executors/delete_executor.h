@@ -60,5 +60,8 @@ class DeleteExecutor : public AbstractExecutor {
   const DeletePlanNode *plan_;
   /** The child executor from which RIDs for deleted tuples are pulled */
   std::unique_ptr<AbstractExecutor> child_executor_;
+  /** The table to delete from */
+  TableInfo *table_info_;
+  bool is_success_ = false;
 };
 }  // namespace bustub
